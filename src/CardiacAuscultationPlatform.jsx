@@ -1174,7 +1174,7 @@ const NAV_ITEMS = [
   { id: 'library', label: 'Tovushlar', icon: Volume2 },
   { id: 'learn', label: 'O\'rganish', icon: BookOpen },
   { id: 'practice', label: 'Mashq', icon: Shuffle },
-  { id: 'qbank', label: 'QBank', icon: GraduationCap },
+  { id: 'qbank', label: 'Savol banki', icon: GraduationCap },
   { id: 'compare', label: 'Solishtirish', icon: Layers },
   { id: 'bookmarks', label: 'Saqlanganlar', icon: Bookmark },
   { id: 'dashboard', label: 'Statistika', icon: BarChart3 },
@@ -1264,12 +1264,12 @@ const TopBar = ({ student, currentPage, setPage, theme, onLogout }) => {
  * 12. HOME PAGE — Dashboard cards
  * ============================================================================ */
 
-const PageContainer = ({ children, title, subtitle }) => (
+const PageContainer = ({ children, title, subtitle, align = 'left' }) => (
   <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '40px 24px' }}>
     {(title || subtitle) && (
-      <div style={{ marginBottom: '32px' }} className="ca-fade">
+      <div style={{ marginBottom: '32px', textAlign: align }} className="ca-fade">
         {title && <h1 className="ca-display" style={{ fontSize: 'clamp(28px, 4vw, 40px)', fontWeight: 500, margin: '0 0 8px', lineHeight: 1.1 }}>{title}</h1>}
-        {subtitle && <p style={{ fontSize: '16px', color: 'var(--ink-soft)', margin: 0, maxWidth: '640px' }}>{subtitle}</p>}
+        {subtitle && <p style={{ fontSize: '16px', color: 'var(--ink-soft)', margin: align === 'center' ? '0 auto' : 0, maxWidth: '640px' }}>{subtitle}</p>}
       </div>
     )}
     {children}
@@ -1286,7 +1286,7 @@ const HomePage = ({ student, setPage, stats }) => {
       icon: BookOpen, accent: 'green' },
     { id: 'practice', title: 'Tasodifiy mashq', desc: 'Tasodifiy tovush — siz taxmin qiling, javob bering, izoh oling.',
       icon: Shuffle, accent: 'accent' },
-    { id: 'qbank', title: 'QBank', desc: 'UWorld uslubidagi savollar, batafsil izohlar, scoring.',
+    { id: 'qbank', title: 'Savol Banki', desc: 'UWorld uslubidagi savollar, batafsil izohlar, scoring.',
       icon: GraduationCap, accent: 'gold' },
     { id: 'compare', title: 'Solishtirish rejimi', desc: 'Ikki shovqinni yonma-yon eshiting va farqlarini ko\'ring.',
       icon: Layers, accent: 'green' },
@@ -1294,12 +1294,13 @@ const HomePage = ({ student, setPage, stats }) => {
 
   return (
     <PageContainer
-      title={<>Xush kelibsiz, <em style={{ fontStyle: 'italic', color: 'var(--accent)' }}>{student.first}</em></>}
+      align="center"
+      title={<>Xush kelibsiz, <em style={{ fontStyle: 'italic', color: 'var(--ink)' }}>{student.first}</em></>}
       subtitle="Bugun yurak shovqinlarini chuqurroq o'rganing. Quyidagi modullardan birini tanlang yoki to'g'ridan-to'g'ri QBankga kiring.">
 
       {/* Quick stats strip */}
       <div className="ca-stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '32px' }}>
-        <StatTile label="Yechilgan savollar" value={stats.attempted} icon={ListChecks} />
+        <StatTile label="Javob berilgan savollar" value={stats.attempted} icon={ListChecks} />
         <StatTile label="Aniqlik" value={stats.attempted > 0 ? `${Math.round((stats.correct / stats.attempted) * 100)}%` : '—'} icon={TrendingUp} />
         <StatTile label="To'g'ri javoblar" value={stats.correct} icon={Check} />
         <StatTile label="Saqlanganlar" value={stats.bookmarks} icon={Bookmark} />
