@@ -47,319 +47,94 @@ import {
  * Yurak tovushlarini real vaqtda sintez qiladi
  * ============================================================================ */
 
+/* ============================================================================
+ * 1. HEART SOUND PLAYER (mp3-based)
+ * Eski Web Audio API sintezini almashtiradi.
+ * Bir xil API: engine.play(soundId), engine.stop(), engine.setVolume()
+ * Mavjud AudioPlayer va sahifalarga tegmaymiz.
+ * ============================================================================ */
+
+const SOUND_FILES = {
+  // Mavjud mp3 fayllar (public/sounds/ ichida)
+  'aortic-stenosis': '/sounds/AS.mp3',
+  'aortic-regurgitation': '/sounds/AR.mp3',
+  'mitral-regurgitation': '/sounds/MR.mp3',
+  's3': '/sounds/S3.mp3',
+  's4': '/sounds/S4.mp3',
+  'pda': '/sounds/PDA.mp3',
+  'vsd': '/sounds/VSD.mp3',
+  // Yo'q tovushlar uchun yaqin alternativalar (vaqtinchalik):
+  's1': '/sounds/S3.mp3',     // S1 fayli yo'q — placeholder
+  's2': '/sounds/S4.mp3',     // S2 fayli yo'q — placeholder
+  'mitral-stenosis': '/sounds/MR.mp3',
+  'tricuspid-regurgitation': '/sounds/MR.mp3',
+  'pulmonary-stenosis': '/sounds/AS.mp3',
+};
+
 class HeartSoundEngine {
   constructor() {
-    this.ctx = null;
-    this.masterGain = null;
-    this.activeNodes = [];
+    this.audio = null;
+    this.volume = 0.8;
+    this.currentSoundId = null;
     this.isPlaying = false;
-    this.scheduledLoop = null;
+    this.onEndCallbacks = [];
   }
 
+  // Eski API saqlangan — boshqa kod o'zgarishsiz ishlaydi
   init() {
-    if (!this.ctx) {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      this.ctx = new AudioCtx();
-      this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = 0.7;
-      this.masterGain.connect(this.ctx.destination);
-    }
-    if (this.ctx.state === 'suspended') this.ctx.resume();
-  }
-
-  // S1 — Mitral + Tricuspid yopilishi (~30-45 Hz, low-pitch thump)
-  scheduleS1(time, intensity = 1) {
-    const ctx = this.ctx;
-    const osc1 = ctx.createOscillator();
-    const osc2 = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-
-    osc1.type = 'sine';
-    osc1.frequency.setValueAtTime(35, time);
-    osc1.frequency.exponentialRampToValueAtTime(28, time + 0.12);
-
-    osc2.type = 'triangle';
-    osc2.frequency.setValueAtTime(70, time);
-    osc2.frequency.exponentialRampToValueAtTime(50, time + 0.1);
-
-    filter.type = 'lowpass';
-    filter.frequency.value = 180;
-    filter.Q.value = 2;
-
-    gain.gain.setValueAtTime(0, time);
-    gain.gain.linearRampToValueAtTime(0.55 * intensity, time + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.14);
-
-    osc1.connect(gain);
-    osc2.connect(gain);
-    gain.connect(filter);
-    filter.connect(this.masterGain);
-
-    osc1.start(time); osc2.start(time);
-    osc1.stop(time + 0.18); osc2.stop(time + 0.18);
-    this.activeNodes.push(osc1, osc2);
-  }
-
-  // S2 — Aortic + Pulmonic yopilishi (~50-100 Hz, sharper, higher than S1)
-  scheduleS2(time, intensity = 1, split = false) {
-    const ctx = this.ctx;
-    const playComponent = (t, freq) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, t);
-      osc.frequency.exponentialRampToValueAtTime(freq * 0.7, t + 0.08);
-
-      filter.type = 'lowpass';
-      filter.frequency.value = 220;
-      filter.Q.value = 2.5;
-
-      gain.gain.setValueAtTime(0, t);
-      gain.gain.linearRampToValueAtTime(0.45 * intensity, t + 0.008);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
-
-      osc.connect(gain);
-      gain.connect(filter);
-      filter.connect(this.masterGain);
-      osc.start(t);
-      osc.stop(t + 0.13);
-      this.activeNodes.push(osc);
-    };
-    playComponent(time, 65);
-    if (split) playComponent(time + 0.04, 75);
-  }
-
-  // S3 — early diastolic, low pitch (ventricular gallop)
-  scheduleS3(time) {
-    const ctx = this.ctx;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-    osc.type = 'sine';
-    osc.frequency.value = 25;
-    filter.type = 'lowpass';
-    filter.frequency.value = 80;
-    gain.gain.setValueAtTime(0, time);
-    gain.gain.linearRampToValueAtTime(0.25, time + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.13);
-    osc.connect(gain); gain.connect(filter); filter.connect(this.masterGain);
-    osc.start(time); osc.stop(time + 0.16);
-    this.activeNodes.push(osc);
-  }
-
-  // S4 — late diastolic, atrial gallop
-  scheduleS4(time) {
-    const ctx = this.ctx;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-    osc.type = 'sine';
-    osc.frequency.value = 22;
-    filter.type = 'lowpass';
-    filter.frequency.value = 75;
-    gain.gain.setValueAtTime(0, time);
-    gain.gain.linearRampToValueAtTime(0.22, time + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.1);
-    osc.connect(gain); gain.connect(filter); filter.connect(this.masterGain);
-    osc.start(time); osc.stop(time + 0.13);
-    this.activeNodes.push(osc);
-  }
-
-  // Murmur — filtered noise with shaped envelope
-  scheduleMurmur(startTime, duration, config) {
-    const ctx = this.ctx;
-    const sampleRate = ctx.sampleRate;
-    const bufferLen = Math.floor(sampleRate * duration);
-    const buffer = ctx.createBuffer(1, bufferLen, sampleRate);
-    const data = buffer.getChannelData(0);
-
-    for (let i = 0; i < bufferLen; i++) {
-      data[i] = (Math.random() * 2 - 1) * 0.5;
-    }
-
-    const noiseSrc = ctx.createBufferSource();
-    noiseSrc.buffer = buffer;
-
-    const filter = ctx.createBiquadFilter();
-    filter.type = config.filterType || 'bandpass';
-    filter.frequency.value = config.centerFreq || 200;
-    filter.Q.value = config.Q || 1.5;
-
-    const gain = ctx.createGain();
-    const peak = config.intensity || 0.18;
-
-    // Envelope shapes
-    if (config.envelope === 'crescendo-decrescendo') {
-      gain.gain.setValueAtTime(0.0001, startTime);
-      gain.gain.linearRampToValueAtTime(peak, startTime + duration * 0.5);
-      gain.gain.linearRampToValueAtTime(0.0001, startTime + duration);
-    } else if (config.envelope === 'decrescendo') {
-      gain.gain.setValueAtTime(peak, startTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
-    } else if (config.envelope === 'crescendo') {
-      gain.gain.setValueAtTime(0.0001, startTime);
-      gain.gain.linearRampToValueAtTime(peak, startTime + duration);
-    } else if (config.envelope === 'plateau' || config.envelope === 'holosystolic') {
-      gain.gain.setValueAtTime(0.0001, startTime);
-      gain.gain.linearRampToValueAtTime(peak, startTime + 0.02);
-      gain.gain.linearRampToValueAtTime(peak, startTime + duration - 0.02);
-      gain.gain.linearRampToValueAtTime(0.0001, startTime + duration);
-    } else {
-      // rumble (low-frequency, sustained)
-      gain.gain.setValueAtTime(0.0001, startTime);
-      gain.gain.linearRampToValueAtTime(peak, startTime + 0.04);
-      gain.gain.linearRampToValueAtTime(peak * 0.7, startTime + duration - 0.05);
-      gain.gain.linearRampToValueAtTime(0.0001, startTime + duration);
-    }
-
-    noiseSrc.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.masterGain);
-    noiseSrc.start(startTime);
-    noiseSrc.stop(startTime + duration);
-    this.activeNodes.push(noiseSrc);
-  }
-
-  // Opening snap (Mitral stenosis) — sharp click in early diastole
-  scheduleOpeningSnap(time) {
-    const ctx = this.ctx;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = 110;
-    gain.gain.setValueAtTime(0, time);
-    gain.gain.linearRampToValueAtTime(0.3, time + 0.003);
-    gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.04);
-    osc.connect(gain); gain.connect(this.masterGain);
-    osc.start(time); osc.stop(time + 0.05);
-    this.activeNodes.push(osc);
-  }
-
-  // Schedule one full cardiac cycle for a given pathology
-  scheduleCycle(soundId, startTime, hr = 75) {
-    const cycleDur = 60 / hr;
-    const systoleDur = cycleDur * 0.35; // ~0.28s at HR 75
-    const s2Time = startTime + systoleDur;
-    const nextS1 = startTime + cycleDur;
-
-    const config = SOUND_CONFIGS[soundId];
-    if (!config) return;
-
-    // Default S1 and S2 unless overridden
-    if (config.s1 !== false) this.scheduleS1(startTime, config.s1Intensity || 1);
-    if (config.s2 !== false) this.scheduleS2(s2Time, config.s2Intensity || 1, config.s2Split);
-
-    if (config.s3) this.scheduleS3(s2Time + 0.16);
-    if (config.s4) this.scheduleS4(nextS1 - 0.09);
-    if (config.openingSnap) this.scheduleOpeningSnap(s2Time + 0.08);
-
-    if (config.murmur) {
-      const m = config.murmur;
-      let mStart, mDur;
-      if (m.timing === 'systolic') {
-        mStart = startTime + 0.04;
-        mDur = systoleDur - 0.06;
-      } else if (m.timing === 'holosystolic') {
-        mStart = startTime + 0.02;
-        mDur = systoleDur - 0.03;
-      } else if (m.timing === 'early-diastolic') {
-        mStart = s2Time + 0.03;
-        mDur = (cycleDur - systoleDur) * 0.55;
-      } else if (m.timing === 'mid-late-diastolic') {
-        mStart = s2Time + 0.18;
-        mDur = (cycleDur - systoleDur) * 0.55;
-      }
-      if (mStart && mDur > 0) this.scheduleMurmur(mStart, mDur, m);
-    }
-  }
-
-  play(soundId, hr = 75) {
-    this.init();
-    this.stop();
-    this.isPlaying = true;
-    const cycleDur = 60 / hr;
-    const startNow = this.ctx.currentTime + 0.05;
-
-    const scheduleAhead = () => {
-      if (!this.isPlaying) return;
-      const now = this.ctx.currentTime;
-      // Schedule next 4 cycles ahead
-      for (let i = 0; i < 4; i++) {
-        const t = (this._nextCycleTime || startNow) + i * cycleDur;
-        if (t < now + 2) {
-          this.scheduleCycle(soundId, t, hr);
-        }
-      }
-      this._nextCycleTime = (this._nextCycleTime || startNow) + 4 * cycleDur;
-      this.scheduledLoop = setTimeout(scheduleAhead, cycleDur * 1000 * 2);
-    };
-
-    this._nextCycleTime = startNow;
-    scheduleAhead();
-  }
-
-  stop() {
-    this.isPlaying = false;
-    if (this.scheduledLoop) {
-      clearTimeout(this.scheduledLoop);
-      this.scheduledLoop = null;
-    }
-    this._nextCycleTime = null;
-    try {
-      this.activeNodes.forEach(n => { try { n.stop(); } catch (e) {} });
-    } catch (e) {}
-    this.activeNodes = [];
+    // Hech narsa qilish shart emas, mp3 darhol yuklanadi
   }
 
   setVolume(v) {
-    if (this.masterGain) this.masterGain.gain.value = Math.max(0, Math.min(1, v));
+    this.volume = Math.max(0, Math.min(1, v));
+    if (this.audio) this.audio.volume = this.volume;
+  }
+
+  play(soundId, opts = {}) {
+    this.stop();
+
+    const file = SOUND_FILES[soundId];
+    if (!file) {
+      console.warn(`Tovush fayli topilmadi: ${soundId}`);
+      return;
+    }
+
+    this.audio = new Audio(file);
+    this.audio.volume = this.volume;
+    this.audio.loop = opts.loop !== false; // default loop = true (auskultatsiya simulyatsiyasi)
+
+    this.audio.play().catch((err) => {
+      console.error(`Audio play xatosi (${soundId}):`, err);
+    });
+
+    this.audio.onended = () => {
+      this.isPlaying = false;
+      this.onEndCallbacks.forEach((cb) => cb());
+    };
+
+    this.currentSoundId = soundId;
+    this.isPlaying = true;
+  }
+
+  stop() {
+    if (this.audio) {
+      this.audio.pause();
+      this.audio.currentTime = 0;
+      this.audio = null;
+    }
+    this.isPlaying = false;
+    this.currentSoundId = null;
+  }
+
+  isFileAvailable(soundId) {
+    const file = SOUND_FILES[soundId];
+    // Vaqtinchalik placeholder bo'lsa false qaytaradi (hali yo'q tovushlarni belgilash uchun)
+    const placeholders = ['s1', 's2', 'mitral-stenosis', 'tricuspid-regurgitation', 'pulmonary-stenosis'];
+    if (placeholders.includes(soundId)) return false;
+    return Boolean(file);
   }
 }
 
-/* ============================================================================
- * 2. SOUND CONFIGURATIONS
- * Har bir tovush uchun sintez parametrlari
- * ============================================================================ */
-
-const SOUND_CONFIGS = {
-  s1: { /* default S1 + S2 */ },
-  s2: { /* default S1 + S2 */ },
-  's2-split': { s2Split: true },
-  s3: { s3: true },
-  s4: { s4: true },
-  'aortic-stenosis': {
-    murmur: { timing: 'systolic', envelope: 'crescendo-decrescendo',
-              centerFreq: 280, Q: 1.2, intensity: 0.32, filterType: 'bandpass' },
-    s2Intensity: 0.5, // softened A2
-  },
-  'aortic-regurgitation': {
-    murmur: { timing: 'early-diastolic', envelope: 'decrescendo',
-              centerFreq: 600, Q: 0.8, intensity: 0.18, filterType: 'bandpass' },
-  },
-  'mitral-regurgitation': {
-    murmur: { timing: 'holosystolic', envelope: 'holosystolic',
-              centerFreq: 380, Q: 1.0, intensity: 0.24, filterType: 'bandpass' },
-    s1Intensity: 0.6,
-  },
-  'mitral-stenosis': {
-    openingSnap: true,
-    murmur: { timing: 'mid-late-diastolic', envelope: 'rumble',
-              centerFreq: 60, Q: 1.5, intensity: 0.26, filterType: 'lowpass' },
-    s1Intensity: 1.3, // loud S1 ("tapping apex")
-  },
-  'tricuspid-regurgitation': {
-    murmur: { timing: 'holosystolic', envelope: 'holosystolic',
-              centerFreq: 320, Q: 1.0, intensity: 0.20, filterType: 'bandpass' },
-  },
-  'pulmonary-stenosis': {
-    murmur: { timing: 'systolic', envelope: 'crescendo-decrescendo',
-              centerFreq: 260, Q: 1.2, intensity: 0.28, filterType: 'bandpass' },
-    s2Split: true,
-  },
-};
 
 /* ============================================================================
  * 3. CONTENT DATA
@@ -1240,7 +1015,7 @@ const WelcomeScreen = ({ onStart, dark }) => {
                 Ism
               </label>
               <input className="ca-input" value={first} onChange={e => { setFirst(e.target.value); setError(''); }}
-                     placeholder="Davlatbek" autoFocus />
+                     placeholder="Nodirjon" autoFocus />
             </div>
             <div>
               <label style={{ fontSize: '12px', fontWeight: 500, color: 'var(--ink-soft)',
@@ -1248,7 +1023,7 @@ const WelcomeScreen = ({ onStart, dark }) => {
                 Familiya
               </label>
               <input className="ca-input" value={last} onChange={e => { setLast(e.target.value); setError(''); }}
-                     placeholder="Shodiyev" />
+                     placeholder="Karimov" />
             </div>
             {error && <div style={{ fontSize: '13px', color: 'var(--accent)' }}>{error}</div>}
             <button type="submit" className="ca-btn ca-btn-accent"
@@ -2525,6 +2300,82 @@ const BarRow = ({ label, acc, total, correct, color }) => (
 );
 
 /* ============================================================================
+ * SIMPLE AUDIO PANEL — mp3 fayllarni /public/sounds/ dan ijro etadi
+ * (HeartSoundEngine'dan alohida — oddiy <audio> orqali)
+ * ============================================================================ */
+
+const SimpleAudioPanel = ({ sounds, playSound, nowPlaying }) => (
+  <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '0 24px 40px' }}>
+    <div className="ca-card" style={{ padding: '28px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+        <Volume2 size={18} style={{ color: 'var(--accent)' }} />
+        <div style={{ fontSize: '11px', color: 'var(--accent)', textTransform: 'uppercase',
+                      letterSpacing: '0.1em', fontWeight: 600 }}>
+          Tovushlar kutubxonasi
+        </div>
+      </div>
+      <h2 className="ca-display" style={{ fontSize: '26px', fontWeight: 500, margin: '0 0 6px',
+                                          letterSpacing: '-0.02em' }}>
+        Yurak tovushlari (mp3)
+      </h2>
+      <p style={{ fontSize: '14px', color: 'var(--ink-soft)', margin: '0 0 20px', lineHeight: 1.6 }}>
+        Bosing va eshitishni boshlang. Fayllar <code style={{ fontFamily: 'var(--font-mono)',
+        fontSize: '12.5px', background: 'var(--bg-soft)', padding: '2px 6px',
+        borderRadius: '4px' }}>public/sounds/</code> papkasida bo'lishi kerak.
+      </p>
+
+      <div style={{ display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                    gap: '12px' }}>
+        {sounds.map((sound) => {
+          const isPlaying = nowPlaying === sound.name;
+          return (
+            <button
+              key={sound.file}
+              onClick={() => playSound(sound.file, sound.name)}
+              className="ca-card"
+              style={{
+                padding: '16px 18px',
+                textAlign: 'left',
+                cursor: 'pointer',
+                border: `1px solid ${isPlaying ? 'var(--accent)' : 'var(--border)'}`,
+                background: isPlaying ? 'var(--accent-soft)' : 'var(--bg-elev)',
+                fontFamily: 'inherit',
+                color: 'var(--ink)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                transition: 'all .2s ease'
+              }}
+            >
+              <div style={{
+                width: '36px', height: '36px', borderRadius: '50%',
+                background: isPlaying ? 'var(--accent)' : 'var(--bg-soft)',
+                color: isPlaying ? 'white' : 'var(--ink)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                {isPlaying ? <Pause size={14} /> : <Play size={14} fill="currentColor" />}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '14px', fontWeight: 600, lineHeight: 1.3,
+                              marginBottom: '2px' }}>
+                  {sound.name}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--ink-muted)',
+                              fontFamily: 'var(--font-mono)' }}>
+                  {sound.file.split('/').pop()}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  </div>
+);
+
+/* ============================================================================
  * MAIN APP - State management and routing
  * ============================================================================ */
 
@@ -2539,6 +2390,43 @@ export default function CardiacAuscultationPlatform() {
     correct: 0,
     perTopic: {} // { soundId: { total, correct } }
   });
+
+  // Simple audio playback (mp3 files in /public/sounds/)
+  const audioRef = useRef(null);
+  const [nowPlaying, setNowPlaying] = useState(null);
+
+  const sounds = [
+    { name: "Aortic Stenosis", file: "/sounds/AS.mp3" },
+    { name: "Mitral Regurgitation", file: "/sounds/MR.mp3" },
+    { name: "Aortic Regurgitation", file: "/sounds/AR.mp3" },
+    { name: "Patent Ductus Arteriosus", file: "/sounds/PDA.mp3" },
+    { name: "S3 Gallop", file: "/sounds/S3.mp3" },
+    { name: "S4 Gallop", file: "/sounds/S4.mp3" },
+    { name: "Ventricular Septal Defect", file: "/sounds/VSD.mp3" }
+  ];
+
+  const playSound = (file, name) => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    audioRef.current = new Audio(file);
+    audioRef.current.play().catch((err) => {
+      console.error("Audio play failed:", err);
+    });
+    audioRef.current.onended = () => setNowPlaying(null);
+    setNowPlaying(name);
+  };
+
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
 
   // Heart sound engine — single instance for the whole app
   const engineRef = useRef(null);
@@ -2594,7 +2482,12 @@ export default function CardiacAuscultationPlatform() {
   const renderPage = () => {
     switch (currentPage) {
       case 'home':
-        return <HomePage student={student} setPage={setCurrentPage} stats={stats} />;
+        return (
+          <>
+            <HomePage student={student} setPage={setCurrentPage} stats={stats} />
+            <SimpleAudioPanel sounds={sounds} playSound={playSound} nowPlaying={nowPlaying} />
+          </>
+        );
       case 'anatomy':
         return <AnatomyPage engine={engine} dark={dark} />;
       case 'library':
@@ -2613,7 +2506,12 @@ export default function CardiacAuscultationPlatform() {
       case 'dashboard':
         return <DashboardPage qbankState={qbankState} practiceLog={practiceLog} student={student} />;
       default:
-        return <HomePage student={student} setPage={setCurrentPage} stats={stats} />;
+        return (
+          <>
+            <HomePage student={student} setPage={setCurrentPage} stats={stats} />
+            <SimpleAudioPanel sounds={sounds} playSound={playSound} nowPlaying={nowPlaying} />
+          </>
+        );
     }
   };
 
