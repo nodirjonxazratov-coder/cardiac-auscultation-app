@@ -1,5 +1,28 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
+// Firebase imports
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+} from "firebase/auth";
+import {
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  collection,
+  addDoc,
+  query,
+  where,
+  getDocs,
+  serverTimestamp,
+  arrayUnion,
+  arrayRemove,
+} from "firebase/firestore";
+import { auth, db } from "./firebase";
+
 import {
   Heart,
   Volume2,
@@ -33,7 +56,9 @@ import {
   Sparkles,
   ScrollText,
   AlertCircle,
-  TrendingUp
+  TrendingUp,
+  LogOut,
+  Loader2
 } from "lucide-react";
 
 /* ============================================================================
@@ -533,6 +558,7 @@ const ThemeStyles = ({ dark }) => (
     @keyframes ca-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .6; transform: scale(1.4); } }
     @keyframes ca-fade-up { 0% { opacity: 0; transform: translateY(8px); } 100% { opacity: 1; transform: translateY(0); } }
     @keyframes ca-ecg { 0% { stroke-dashoffset: 1200; } 100% { stroke-dashoffset: 0; } }
+    @keyframes ca-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     .ca-fade { animation: ca-fade-up .4s ease-out both; }
     .ca-stagger > * { animation: ca-fade-up .5s ease-out both; }
     .ca-stagger > *:nth-child(1) { animation-delay: .04s; }
@@ -954,23 +980,73 @@ const ChestDiagram = ({ engine, onPointSelect, activePoint, dark }) => {
  * 10. WELCOME / IDENTIFICATION SCREEN
  * ============================================================================ */
 
-const WelcomeScreen = ({ onStart, dark }) => {
+const WelcomeScreen = ({ onAuth, dark }) => {
+  const [mode, setMode] = useState('login'); // 'login' | 'signup'
   const [first, setFirst] = useState('');
   const [last, setLast] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e?.preventDefault();
-    if (!first.trim() || !last.trim()) {
+    setError('');
+
+    if (!email.trim() || !password) {
+      setError('Email va parolni kiriting');
+      return;
+    }
+    if (mode === 'signup' && (!first.trim() || !last.trim())) {
       setError('Iltimos, ism va familiyangizni kiriting');
       return;
     }
-    onStart({ first: first.trim(), last: last.trim() });
+    if (password.length < 6) {
+      setError('Parol kamida 6 ta belgi bo\'lishi kerak');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await onAuth({ mode, email: email.trim(), password,
+                     first: first.trim(), last: last.trim() });
+    } catch (err) {
+      // Firebase xatolarini foydalanuvchi tushunadigan tilga o'girish
+      const code = err?.code || '';
+      if (code.includes('user-not-found') || code.includes('wrong-password') ||
+          code.includes('invalid-credential')) {
+        setError('Email yoki parol noto\'g\'ri');
+      } else if (code.includes('email-already-in-use')) {
+        setError('Bu email allaqachon ro\'yxatdan o\'tgan');
+      } else if (code.includes('invalid-email')) {
+        setError('Email format noto\'g\'ri');
+      } else if (code.includes('network-request-failed')) {
+        setError('Internet aloqasi yo\'q');
+      } else {
+        setError(err?.message || 'Xato yuz berdi');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div className="ca-bg-grid" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
       <div className="ca-fade" style={{ maxWidth: '520px', width: '100%' }}>
+        {/* Genflix Ecosystem brand bar */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      gap: '10px', marginBottom: '28px', opacity: 0.7 }}>
+          <div style={{ width: '24px', height: '1px', background: 'var(--border-strong)' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px',
+                        fontSize: '10px', letterSpacing: '0.18em',
+                        textTransform: 'uppercase', color: 'var(--ink-muted)',
+                        fontWeight: 600 }}>
+            <span style={{ color: 'var(--accent)' }}>◆</span>
+            Genflix Ecosystem
+          </div>
+          <div style={{ width: '24px', height: '1px', background: 'var(--border-strong)' }} />
+        </div>
+
         {/* ECG line decoration */}
         <div style={{ marginBottom: '32px', height: '60px', position: 'relative', overflow: 'hidden' }}>
           <svg viewBox="0 0 600 60" width="100%" height="60">
@@ -996,46 +1072,91 @@ const WelcomeScreen = ({ onStart, dark }) => {
             Yurak <em style={{ fontStyle: 'italic', color: 'var(--accent)' }}>auskultatsiyasi</em>
           </h1>
           <p style={{ fontSize: '17px', color: 'var(--ink-soft)', maxWidth: '420px', margin: '0 auto', lineHeight: 1.5 }}>
-            Yurak tovushlari va shovqinlarini interaktiv tarzda o'rganing. UWorld uslubidagi savollar bilan klinik ko'nikmalarni mustahkamlang.
+            Yurak tovushlari va shovqinlarini interaktiv tarzda o'rganing. Natijalaringiz bulutda saqlanadi.
           </p>
         </div>
 
         <div className="ca-card-strong" style={{ padding: '32px' }}>
-          <div style={{ marginBottom: '20px' }}>
-            <h2 className="ca-display" style={{ fontSize: '22px', fontWeight: 500, margin: '0 0 6px' }}>Boshlash</h2>
-            <p style={{ fontSize: '14px', color: 'var(--ink-soft)', margin: 0 }}>
-              Ism va familiyangizni kiriting — natijalaringiz session davomida saqlanadi.
-            </p>
+          <div style={{ display: 'flex', gap: '4px', marginBottom: '24px',
+                        background: 'var(--bg-soft)', padding: '4px', borderRadius: '8px' }}>
+            <button type="button" onClick={() => { setMode('login'); setError(''); }}
+                    className="ca-btn"
+                    style={{ flex: 1, justifyContent: 'center',
+                             background: mode === 'login' ? 'var(--bg-elev)' : 'transparent',
+                             color: mode === 'login' ? 'var(--ink)' : 'var(--ink-muted)',
+                             boxShadow: mode === 'login' ? 'var(--shadow-sm)' : 'none',
+                             fontWeight: mode === 'login' ? 600 : 500 }}>
+              Kirish
+            </button>
+            <button type="button" onClick={() => { setMode('signup'); setError(''); }}
+                    className="ca-btn"
+                    style={{ flex: 1, justifyContent: 'center',
+                             background: mode === 'signup' ? 'var(--bg-elev)' : 'transparent',
+                             color: mode === 'signup' ? 'var(--ink)' : 'var(--ink-muted)',
+                             boxShadow: mode === 'signup' ? 'var(--shadow-sm)' : 'none',
+                             fontWeight: mode === 'signup' ? 600 : 500 }}>
+              Ro'yxatdan o'tish
+            </button>
           </div>
 
           <form onSubmit={submit} style={{ display: 'grid', gap: '14px' }}>
+            {mode === 'signup' && (
+              <>
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 500, color: 'var(--ink-soft)',
+                                 textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: '6px' }}>
+                    Ism
+                  </label>
+                  <input className="ca-input" value={first} onChange={e => { setFirst(e.target.value); setError(''); }}
+                         placeholder="Davlatbek" />
+                </div>
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 500, color: 'var(--ink-soft)',
+                                 textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: '6px' }}>
+                    Familiya
+                  </label>
+                  <input className="ca-input" value={last} onChange={e => { setLast(e.target.value); setError(''); }}
+                         placeholder="Shodiyev" />
+                </div>
+              </>
+            )}
             <div>
               <label style={{ fontSize: '12px', fontWeight: 500, color: 'var(--ink-soft)',
                              textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: '6px' }}>
-                Ism
+                Email
               </label>
-              <input className="ca-input" value={first} onChange={e => { setFirst(e.target.value); setError(''); }}
-                     placeholder="Nodirjon" autoFocus />
+              <input className="ca-input" type="email" value={email}
+                     onChange={e => { setEmail(e.target.value); setError(''); }}
+                     placeholder="example@gmail.com" autoComplete="email" />
             </div>
             <div>
               <label style={{ fontSize: '12px', fontWeight: 500, color: 'var(--ink-soft)',
                              textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: '6px' }}>
-                Familiya
+                Parol
               </label>
-              <input className="ca-input" value={last} onChange={e => { setLast(e.target.value); setError(''); }}
-                     placeholder="Karimov" />
+              <input className="ca-input" type="password" value={password}
+                     onChange={e => { setPassword(e.target.value); setError(''); }}
+                     placeholder="Kamida 6 belgi"
+                     autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} />
             </div>
-            {error && <div style={{ fontSize: '13px', color: 'var(--accent)' }}>{error}</div>}
-            <button type="submit" className="ca-btn ca-btn-accent"
-                    style={{ marginTop: '8px', justifyContent: 'center', padding: '14px' }}>
-              Platformaga kirish <ArrowRight size={16} />
+            {error && <div style={{ fontSize: '13px', color: 'var(--accent)',
+                                    padding: '10px 12px', background: 'var(--accent-soft)',
+                                    borderRadius: '6px' }}>{error}</div>}
+            <button type="submit" className="ca-btn ca-btn-accent" disabled={loading}
+                    style={{ marginTop: '8px', justifyContent: 'center', padding: '14px',
+                             opacity: loading ? 0.6 : 1, cursor: loading ? 'wait' : 'pointer' }}>
+              {loading ? 'Iltimos kuting...' : (mode === 'login' ? 'Kirish' : 'Ro\'yxatdan o\'tish')}
+              {!loading && <ArrowRight size={16} />}
             </button>
           </form>
         </div>
 
         <div style={{ marginTop: '32px', textAlign: 'center', fontSize: '12px', color: 'var(--ink-muted)',
                      letterSpacing: '0.06em' }}>
-          Tibbiyot talabalari uchun ishlab chiqilgan · Ma'lumotlar mahalliy saqlanadi
+          Tibbiyot talabalari uchun · Ma'lumotlar Firebase'da xavfsiz saqlanadi
+          <div style={{ marginTop: '8px', fontSize: '11px', opacity: 0.7 }}>
+            Part of <span style={{ fontWeight: 600, color: 'var(--ink-soft)' }}>Genflix Ecosystem</span>
+          </div>
         </div>
       </div>
     </div>
@@ -1059,7 +1180,7 @@ const NAV_ITEMS = [
   { id: 'dashboard', label: 'Statistika', icon: BarChart3 },
 ];
 
-const TopBar = ({ student, currentPage, setPage, theme }) => {
+const TopBar = ({ student, currentPage, setPage, theme, onLogout }) => {
   return (
     <header style={{ position: 'sticky', top: 0, zIndex: 50,
                     background: 'var(--bg)', borderBottom: '1px solid var(--border)',
@@ -1072,8 +1193,18 @@ const TopBar = ({ student, currentPage, setPage, theme }) => {
             <Heart size={18} color="white" fill="white" />
           </div>
           <div>
-            <div className="ca-display" style={{ fontSize: '17px', fontWeight: 600, lineHeight: 1 }}>Cardiac Sounds</div>
-            <div style={{ fontSize: '10px', color: 'var(--ink-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div className="ca-display" style={{ fontSize: '17px', fontWeight: 600, lineHeight: 1 }}>Cardiac Sounds</div>
+              <span style={{ fontSize: '9px', fontWeight: 600, letterSpacing: '0.1em',
+                             textTransform: 'uppercase',
+                             padding: '2px 6px', borderRadius: '3px',
+                             background: 'var(--bg-soft)',
+                             color: 'var(--ink-muted)',
+                             border: '1px solid var(--border)' }}>
+                Genflix
+              </span>
+            </div>
+            <div style={{ fontSize: '10px', color: 'var(--ink-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: '2px' }}>
               Auskultatsiya o'qituvchisi
             </div>
           </div>
@@ -1089,8 +1220,14 @@ const TopBar = ({ student, currentPage, setPage, theme }) => {
             <span style={{ fontWeight: 500, color: 'var(--ink)' }}>{student.first} {student.last}</span>
           </div>
           <button onClick={theme.toggle} className="ca-btn ca-btn-ghost"
-                  style={{ width: '36px', height: '36px', padding: 0, justifyContent: 'center' }}>
+                  style={{ width: '36px', height: '36px', padding: 0, justifyContent: 'center' }}
+                  title={theme.dark ? 'Yorug\' rejim' : 'Qorong\'i rejim'}>
             {theme.dark ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+          <button onClick={onLogout} className="ca-btn ca-btn-ghost"
+                  style={{ width: '36px', height: '36px', padding: 0, justifyContent: 'center' }}
+                  title="Chiqish">
+            <LogOut size={16} />
           </button>
         </div>
       </div>
@@ -2381,7 +2518,14 @@ const SimpleAudioPanel = ({ sounds, playSound, nowPlaying }) => (
 
 export default function CardiacAuscultationPlatform() {
   const { dark, toggle: toggleDark } = useTheme();
-  const [student, setStudent] = useState(null);
+
+  // Firebase auth
+  const [authUser, setAuthUser] = useState(null);     // Firebase user object
+  const [authChecked, setAuthChecked] = useState(false); // initial auth state loaded
+  const [student, setStudent] = useState(null);        // { first, last } from Firestore profile
+  const [dataLoading, setDataLoading] = useState(false);
+
+  // App state (will be hydrated from Firestore)
   const [currentPage, setCurrentPage] = useState('home');
   const [bookmarks, setBookmarks] = useState([]);
   const [practiceLog, setPracticeLog] = useState([]);
@@ -2395,7 +2539,7 @@ export default function CardiacAuscultationPlatform() {
   const audioRef = useRef(null);
   const [nowPlaying, setNowPlaying] = useState(null);
 
-  const sounds = [
+  const sounds = useMemo(() => [
     { name: "Aortic Stenosis", file: "/sounds/AS.mp3" },
     { name: "Mitral Regurgitation", file: "/sounds/MR.mp3" },
     { name: "Aortic Regurgitation", file: "/sounds/AR.mp3" },
@@ -2403,9 +2547,9 @@ export default function CardiacAuscultationPlatform() {
     { name: "S3 Gallop", file: "/sounds/S3.mp3" },
     { name: "S4 Gallop", file: "/sounds/S4.mp3" },
     { name: "Ventricular Septal Defect", file: "/sounds/VSD.mp3" }
-  ];
+  ], []);
 
-  const playSound = (file, name) => {
+  const playSound = useCallback((file, name) => {
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -2416,7 +2560,7 @@ export default function CardiacAuscultationPlatform() {
     });
     audioRef.current.onended = () => setNowPlaying(null);
     setNowPlaying(name);
-  };
+  }, []);
 
   // Cleanup audio on unmount
   useEffect(() => {
@@ -2447,13 +2591,195 @@ export default function CardiacAuscultationPlatform() {
     };
   }, [engine]);
 
-  const toggleBookmark = useCallback((qid) => {
-    setBookmarks(prev => prev.includes(qid) ? prev.filter(x => x !== qid) : [...prev, qid]);
+  /* ========== FIREBASE: Authentication state listener ========== */
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setAuthUser(user);
+      setAuthChecked(true);
+      if (!user) {
+        // Logged out — clear local state
+        setStudent(null);
+        setBookmarks([]);
+        setPracticeLog([]);
+        setQbankState({ attempted: 0, correct: 0, perTopic: {} });
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
-  const logPractice = useCallback((entry) => {
-    setPracticeLog(prev => [...prev, entry]);
+  /* ========== FIREBASE: Load user data on login ========== */
+  useEffect(() => {
+    if (!authUser) return;
+
+    const loadUserData = async () => {
+      setDataLoading(true);
+      try {
+        // 1. User profile (firstName, lastName, bookmarks)
+        const userRef = doc(db, 'users', authUser.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          const data = userSnap.data();
+          setStudent({
+            first: data.firstName || authUser.email.split('@')[0],
+            last: data.lastName || ''
+          });
+          setBookmarks(data.bookmarks || []);
+        } else {
+          // Profile doesn't exist yet — create minimal one
+          const fallbackFirst = authUser.email.split('@')[0];
+          await setDoc(userRef, {
+            firstName: fallbackFirst,
+            lastName: '',
+            email: authUser.email,
+            bookmarks: [],
+            createdAt: serverTimestamp(),
+          });
+          setStudent({ first: fallbackFirst, last: '' });
+          setBookmarks([]);
+        }
+
+        // 2. Qbank results — aggregate
+        const qbankQ = query(
+          collection(db, 'qbankResults'),
+          where('userId', '==', authUser.uid)
+        );
+        const qbankSnap = await getDocs(qbankQ);
+        let attempted = 0;
+        let correct = 0;
+        const perTopic = {};
+        qbankSnap.forEach(d => {
+          const r = d.data();
+          attempted += r.total || 0;
+          correct += r.correctCount || 0;
+          if (r.perTopic) {
+            Object.entries(r.perTopic).forEach(([soundId, stat]) => {
+              if (!perTopic[soundId]) perTopic[soundId] = { total: 0, correct: 0 };
+              perTopic[soundId].total += stat.total || 0;
+              perTopic[soundId].correct += stat.correct || 0;
+            });
+          }
+        });
+        setQbankState({ attempted, correct, perTopic });
+
+        // 3. Practice log
+        const practiceQ = query(
+          collection(db, 'practiceLog'),
+          where('userId', '==', authUser.uid)
+        );
+        const practiceSnap = await getDocs(practiceQ);
+        const log = practiceSnap.docs.map(d => d.data());
+        setPracticeLog(log);
+      } catch (err) {
+        console.error("Firestore load error:", err);
+      } finally {
+        setDataLoading(false);
+      }
+    };
+
+    loadUserData();
+  }, [authUser]);
+
+  /* ========== AUTH HANDLERS ========== */
+  const handleAuth = useCallback(async ({ mode, email, password, first, last }) => {
+    if (mode === 'signup') {
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      // Create user profile in Firestore
+      await setDoc(doc(db, 'users', cred.user.uid), {
+        firstName: first,
+        lastName: last,
+        email: email,
+        bookmarks: [],
+        createdAt: serverTimestamp(),
+      });
+      // Note: setStudent will be set by the load effect above
+    } else {
+      await signInWithEmailAndPassword(auth, email, password);
+    }
   }, []);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      engine.stop();
+      if (audioRef.current) audioRef.current.pause();
+      await signOut(auth);
+      setCurrentPage('home');
+    } catch (err) {
+      console.error("Logout error:", err);
+    }
+  }, [engine]);
+
+  /* ========== BOOKMARKS — Firestore sync ========== */
+  const toggleBookmark = useCallback(async (qid) => {
+    if (!authUser) return;
+    const isAdding = !bookmarks.includes(qid);
+
+    // Optimistic UI update
+    setBookmarks(prev =>
+      isAdding ? [...prev, qid] : prev.filter(x => x !== qid)
+    );
+
+    // Sync to Firestore
+    try {
+      const userRef = doc(db, 'users', authUser.uid);
+      await updateDoc(userRef, {
+        bookmarks: isAdding ? arrayUnion(qid) : arrayRemove(qid),
+      });
+    } catch (err) {
+      console.error("Bookmark sync error:", err);
+      // Rollback on failure
+      setBookmarks(prev =>
+        isAdding ? prev.filter(x => x !== qid) : [...prev, qid]
+      );
+    }
+  }, [authUser, bookmarks]);
+
+  /* ========== PRACTICE LOG — Firestore save ========== */
+  const logPractice = useCallback(async (entry) => {
+    setPracticeLog(prev => [...prev, entry]);
+    if (!authUser) return;
+    try {
+      await addDoc(collection(db, 'practiceLog'), {
+        ...entry,
+        userId: authUser.uid,
+        createdAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.error("Practice log save error:", err);
+    }
+  }, [authUser]);
+
+  /* ========== QBANK STATE — wrap setter to also save to Firestore ========== */
+  const setQbankStateWithSync = useCallback((updater) => {
+    setQbankState(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      // Detect if this is an end-of-quiz save (significant change)
+      // We save whenever attempted increases — i.e. user submitted answers
+      if (authUser && next.attempted > prev.attempted) {
+        const sessionAttempted = next.attempted - prev.attempted;
+        const sessionCorrect = next.correct - prev.correct;
+        const sessionPerTopic = {};
+        Object.entries(next.perTopic || {}).forEach(([sid, stat]) => {
+          const prevStat = prev.perTopic?.[sid] || { total: 0, correct: 0 };
+          if (stat.total > prevStat.total) {
+            sessionPerTopic[sid] = {
+              total: stat.total - prevStat.total,
+              correct: stat.correct - prevStat.correct,
+            };
+          }
+        });
+        // Save quiz session asynchronously
+        addDoc(collection(db, 'qbankResults'), {
+          userId: authUser.uid,
+          total: sessionAttempted,
+          correctCount: sessionCorrect,
+          accuracy: sessionAttempted ? Math.round((sessionCorrect / sessionAttempted) * 100) : 0,
+          perTopic: sessionPerTopic,
+          createdAt: serverTimestamp(),
+        }).catch(err => console.error("Qbank save error:", err));
+      }
+      return next;
+    });
+  }, [authUser]);
 
   // Aggregate stats for HomePage
   const stats = useMemo(() => {
@@ -2468,12 +2794,45 @@ export default function CardiacAuscultationPlatform() {
     };
   }, [qbankState, practiceLog, bookmarks]);
 
-  // Welcome screen if no student yet
-  if (!student) {
+  /* ========== RENDER ========== */
+
+  // While checking auth state — show splash
+  if (!authChecked) {
     return (
       <div className="ca-app">
         <ThemeStyles dark={dark} />
-        <WelcomeScreen onStart={(s) => setStudent(s)} dark={dark} />
+        <div style={{ minHeight: '100vh', display: 'flex',
+                      alignItems: 'center', justifyContent: 'center' }}>
+          <Loader2 size={28} style={{ color: 'var(--accent)',
+                   animation: 'ca-spin 1s linear infinite' }} />
+        </div>
+      </div>
+    );
+  }
+
+  // Not logged in — show welcome/auth
+  if (!authUser) {
+    return (
+      <div className="ca-app">
+        <ThemeStyles dark={dark} />
+        <WelcomeScreen onAuth={handleAuth} dark={dark} />
+      </div>
+    );
+  }
+
+  // Logged in but profile still loading
+  if (!student || dataLoading) {
+    return (
+      <div className="ca-app">
+        <ThemeStyles dark={dark} />
+        <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column',
+                      alignItems: 'center', justifyContent: 'center', gap: '14px' }}>
+          <Loader2 size={28} style={{ color: 'var(--accent)',
+                   animation: 'ca-spin 1s linear infinite' }} />
+          <div style={{ fontSize: '13px', color: 'var(--ink-muted)' }}>
+            Ma'lumotlar yuklanmoqda...
+          </div>
+        </div>
       </div>
     );
   }
@@ -2498,7 +2857,7 @@ export default function CardiacAuscultationPlatform() {
         return <PracticePage engine={engine} onLog={logPractice} />;
       case 'qbank':
         return <QbankPage engine={engine} bookmarks={bookmarks} toggleBookmark={toggleBookmark}
-                          qbankState={qbankState} setQbankState={setQbankState} />;
+                          qbankState={qbankState} setQbankState={setQbankStateWithSync} />;
       case 'compare':
         return <ComparePage engine={engine} />;
       case 'bookmarks':
@@ -2521,16 +2880,35 @@ export default function CardiacAuscultationPlatform() {
       <TopBar student={student}
               currentPage={currentPage}
               setPage={setCurrentPage}
-              theme={{ dark, toggle: toggleDark }} />
+              theme={{ dark, toggle: toggleDark }}
+              onLogout={handleLogout} />
       <main>{renderPage()}</main>
-      <footer style={{ borderTop: '1px solid var(--border)', padding: '24px',
+      <footer style={{ borderTop: '1px solid var(--border)', padding: '32px 24px',
                        textAlign: 'center', fontSize: '12px', color: 'var(--ink-muted)',
                        marginTop: '40px' }}>
-        <div style={{ fontFamily: 'var(--font-display)', fontSize: '14px', color: 'var(--ink-soft)',
-                      marginBottom: '4px', letterSpacing: '-0.01em' }}>
-          Cardiac Auscultation Trainer
+        <div style={{ maxWidth: '1280px', margin: '0 auto' }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', color: 'var(--ink-soft)',
+                        marginBottom: '6px', letterSpacing: '-0.01em', fontWeight: 500 }}>
+            Cardiac Auscultation Trainer
+          </div>
+          <div style={{ marginBottom: '14px' }}>
+            Tibbiyot talabalari uchun ta'limiy platforma · Firebase orqali sinxronlashtirilgan
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        gap: '12px', paddingTop: '14px',
+                        borderTop: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px',
+                          fontSize: '11px', letterSpacing: '0.16em',
+                          textTransform: 'uppercase', fontWeight: 600,
+                          color: 'var(--ink-soft)' }}>
+              <span style={{ color: 'var(--accent)', fontSize: '14px', lineHeight: 1 }}>◆</span>
+              <span>
+                Part of <span style={{ color: 'var(--ink)' }}>Genflix Ecosystem</span>
+              </span>
+            </div>
+          </div>
         </div>
-        <div>Tibbiyot talabalari uchun ta'limiy platforma · Audio sintez Web Audio API orqali</div>
       </footer>
     </div>
   );
